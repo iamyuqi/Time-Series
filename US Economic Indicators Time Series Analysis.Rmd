@@ -1,0 +1,353 @@
+---
+title: "FE542Group1"
+author: "Yuqi Liu"
+date: "April 16, 2018"
+output: word_document
+---
+## Package preparation
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(quantmod)
+library(fUnitRoots)
+library(forecast)
+library(lubridate)
+library(TSA)
+library(fGarch)
+```
+
+## Generate data
+```{r,warning=FALSE}
+symbols <- c('CPIAUCNS','GDP','UNEMPLOY','INDPRO')
+getSymbols(symbols, src='FRED')
+
+# Visualization
+par(mfrow=c(2,2))
+plot(CPIAUCNS, main="Consumer Price Index", type="l")
+plot(GDP, main="Gross Domestic Product", type="l")
+plot(UNEMPLOY, main="Unemployment Level", type="l")
+plot(INDPRO, main="Industrial Production Index", type="l")
+```
+
+## Determine the time interval/split the data into a trainning set and a test set
+```{r,warning=FALSE}
+date1 <- as.POSIXct("2009-02-27 02:00:00")
+date2 <- as.POSIXct("2009-02-27 05:00:00")
+Time_interval1 <- new_interval("1996-01-01", "2016-12-31")
+
+#training set
+CPI_tr <- CPIAUCNS[as.Date(rownames(as.data.frame(CPIAUCNS))) %within% Time_interval1,]
+GDP_tr <- GDP[as.Date(rownames(as.data.frame(GDP))) %within% Time_interval1,]
+UNEMPLOY_tr <- UNEMPLOY[as.Date(rownames(as.data.frame(UNEMPLOY))) %within% Time_interval1,]
+INDPRO_tr <- INDPRO[as.Date(rownames(as.data.frame(INDPRO))) %within% Time_interval1,]
+
+#calculate continues returns
+Rt_CPI <- diff(log(CPI_tr))[-1]
+Rt_GDP <- diff(log(GDP_tr))[-1]
+Rt_UNEPLOY <- diff(log(UNEMPLOY_tr))[-1]
+Rt_INDPRO <- diff(log(INDPRO_tr))[-1]
+```
+
+## Unit-Root Stationarity study
+```{r,warning=FALSE}
+#perform Augemented Dickey-Fuller test
+adfTest(Rt_CPI,lag=ar(Rt_CPI)$order)
+adfTest(Rt_GDP,lag=ar(Rt_GDP)$order) #unit-root exist
+adfTest(Rt_UNEPLOY,lag=ar(Rt_UNEPLOY)$order)
+adfTest(Rt_INDPRO,lag=ar(Rt_INDPRO)$order)
+```
+
+## CPI ARIMA Modeling
+```{r}
+tsdisplay(Rt_CPI)
+# function for order determination
+#AIC_CPI <- NULL
+#for(p in 0 : 24)
+#{
+#  for(q in 0 : 24)
+#  {
+#    AIC_CPI <- c(AIC_CPI, arima(Rt_CPI, order = c(p, 0, q))$aic)
+#  }
+#}
+```
+```{r}
+# show the result
+#Order_Determine <- function(aic_vector, p_ori, q_ori)
+#{
+#  n <- which.min(aic_vector)
+#  q <- (n %% (q_ori + 1))
+#  if(q == 0)
+#  {
+#    p <- (n - n %% (q_ori + 1)) / (q_ori + 1) - 1
+#    q <- q_ori
+#  }else
+#  {
+#    p <- (n - n %% (q_ori + 1)) / (q_ori + 1)
+#    q <- q - 1
+#  }
+#  print(paste("p", p, sep = "="))
+#  print(paste("q", q, sep = "="))
+#}
+#Order_Determine(AIC_CPI,24,24)
+# the result shows that ARMA(2,0,5) has the least AIC
+```
+```{r}
+model.cpi <- arima(Rt_CPI, order = c(2, 0, 5))
+summary(model.cpi)
+#check model
+tsdisplay(model.cpi$residuals)
+# time period 24 shows slightly seasonality
+# Adjusted model
+tsdisplay(arima(Rt_CPI, order = c(2, 0, 5), seasonal = list(order = c(1,0,1), period = 9))$residuals)
+model.cpi<-arima(Rt_CPI, order = c(2, 0, 5), seasonal = list(order = c(1,0,1), period = 24))
+tsdisplay(model.cpi$residuals,lag=35)
+#tsdiag(model.cpi)
+Box.test(model.cpi$residuals,lag=11,type="Ljung")
+Box.test(model.cpi$residuals,lag=28,type="Ljung")
+```
+
+## GDP ARIMA Modeling
+```{r}
+# since didn't pass ADF test, take differential of GDP and test again
+dRt_GDP <- diff(Rt_GDP)[-1]
+adfTest(dRt_GDP,lag=ar(dRt_GDP)$order)
+tsdisplay(dRt_GDP)
+#AIC_GDP <- NULL
+#for(p in 0 : 24)
+#{
+#  for(q in 0 : 24)
+#  {
+#    AIC_GDP <- c(AIC_GDP, arima(dRt_GDP, order = c(p, 0, q))$aic)
+#  }
+#}
+#Order_Determine(AIC_GDP,24,24)
+# ARMA(2,1)
+```
+```{r}
+model.gdp <- arima(Rt_GDP, order = c(2, 1, 1))
+summary(model.gdp)
+tsdisplay(model.gdp$residuals,lag=20)
+tsdiag(model.gdp) #model ok
+```
+
+## Unemployment Level ARIMA Modeling
+```{r}
+tsdisplay(Rt_UNEPLOY)
+#AIC_Une <- NULL
+#for(p in 0 : 24)
+#{
+#  for(q in 0 : 11)
+#  {
+#    AIC_Une <- c(AIC_Une, arima(Rt_UNEPLOY,method = "ML", order = c(p, 0, q))$aic)
+#  }
+#}
+#Order_Determine(AIC_Une,24,11)
+```
+```{r}
+arima(Rt_UNEPLOY, order = c(6, 0, 5))$aic
+arima(Rt_UNEPLOY, order = c(9, 0, 9))$aic
+model.une <- arima(Rt_UNEPLOY, order = c(6, 0, 5))
+summary(model.une)
+tsdisplay(model.une$residuals)
+tsdiag(model.une) #model ok
+```
+
+## Industrial Production ARIMA Modeling
+```{r}
+tsdisplay(Rt_INDPRO)
+#AIC_INDPRO <- NULL
+#for(p in 0 : 7)
+#{
+#  for(q in 0 : 6)
+#  {
+#    AIC_INDPRO <- c(AIC_INDPRO, arima(Rt_INDPRO, order = c(p, 0, q))$aic)
+#  }
+#}
+#Order_Determine(AIC_INDPRO,7,6)
+# The result shows that ARiMA(1,0,3) is the best
+```
+```{r}
+arima(Rt_INDPRO, order = c(1, 0, 3))$aic
+model.ip <- arima(Rt_INDPRO, order = c(1, 0, 3))
+summary(model.ip)
+tsdisplay(model.ip$residuals)
+# time period 24 shows slightly seasonality
+# Adjusted model
+model.ip <-arima(Rt_INDPRO, order = c(1, 0, 3), seasonal = list(order = c(1,0,0), period = 24))
+tsdisplay(model.ip$residuals)
+tsdiag(model.ip)
+```
+
+## Prediction using ARIMA/Seasonal Models
+```{r}
+model.cpi<-arima(Rt_CPI, order = c(2, 0, 5), seasonal = list(order = c(1,0,1), period = 24))
+model.gdp <- arima(Rt_GDP, order = c(2, 1, 1))
+model.une <- arima(Rt_UNEPLOY, order = c(6, 0, 5))
+model.ip <-arima(Rt_INDPRO, order = c(1, 0, 3), seasonal = list(order = c(1,0,0), period = 24))
+
+pred.cpi<-predict(model.cpi,16)
+pred.gdp<-predict(model.gdp,5)
+pred.une<-predict(model.une,16)
+pred.ip<-predict(model.ip,15)
+
+rt_cpi <- diff(log(CPIAUCNS))[-1]
+rt_gdp <- diff(log(GDP))[-1]
+rt_unemploy <- diff(log(UNEMPLOY))[-1]
+rt_indpro <- diff(log(INDPRO))[-1]
+```
+```{r}
+# Visualization
+plotr<-function(tik,data,pr,num,name,y){
+  plot(tail(as.Date(rownames(as.data.frame(tik))),31),data[(length(data)-30):length(data)],type="l",ylim=y,main=name)
+  points(tail(as.Date(rownames(as.data.frame(tik))),num),pr$pred,col="darkred")
+  lines(tail(as.Date(rownames(as.data.frame(tik))),num),pr$pred,col="red")
+  lines(tail(as.Date(rownames(as.data.frame(tik))),num),pr$pred+1.96*pr$se,col="royalblue")
+  lines(tail(as.Date(rownames(as.data.frame(tik))),num),pr$pred-1.96*pr$se,col="royalblue")
+}
+par(mfrow=c(2,2))
+plotr(CPIAUCNS,rt_cpi,pred.cpi,16,"CPI",c(-.0069,.0105))
+plotr(GDP,rt_gdp,pred.gdp,5,"GDP",c(-.005,.023))
+plotr(UNEMPLOY,rt_unemploy,pred.une,16,"Unemployment Level",c(-.065,.058))
+plotr(INDPRO,rt_indpro,pred.ip,15,"Industrial Production",c(-.012,.015))
+```
+
+## Test ARCH effect
+```{r}
+# CPI 
+Box.test((Rt_CPI-mean(Rt_CPI))^2, lag=12, type='Ljung')
+#GDP
+Box.test((Rt_GDP-mean(Rt_GDP))^2, lag=12, type='Ljung')
+Box.test((dRt_GDP-mean(dRt_GDP))^2, lag=12, type='Ljung')
+#Unemployment Rate
+Box.test((Rt_UNEPLOY-mean(Rt_UNEPLOY))^2, lag=12, type='Ljung')
+#Industrial Production
+Box.test((Rt_INDPRO-mean(Rt_INDPRO))^2, lag=12, type='Ljung')
+```
+```{r}
+# Further test
+Box.test((arima(Rt_CPI, order = c(2, 0, 5))$res)^2, lag = 30, type = "Ljung")
+Box.test((arima(Rt_GDP, order = c(2, 1, 1))$res)^2, lag = 30, type = "Ljung")
+Box.test((arima(dRt_GDP, order = c(2, 0, 1))$res)^2, lag = 30, type = "Ljung")
+Box.test((arima(Rt_UNEPLOY, order = c(6, 0, 5))$res)^2, lag = 30, type = "Ljung")
+Box.test((arima(Rt_INDPRO, order = c(1, 0, 3))$res)^2, lag = 30, type = "Ljung")
+```
+
+## ARIMAX Modeling
+```{r}
+#  CPI
+summary(arima(Rt_CPI, order = c(2, 0, 5), seasonal = list(order = c(1,0,1), period = 24), xreg=Rt_UNEPLOY))
+summary(arima(Rt_CPI, order = c(2, 0, 5), seasonal = list(order = c(1,0,1), period = 24), xreg=Rt_INDPRO))
+summary(arima(Rt_CPI, order = c(2, 0, 5), seasonal = list(order = c(1,0,1), period = 24), xreg=CPI_tr[-length(CPI_tr)]))
+summary(arima(Rt_CPI, order = c(2, 0, 5), seasonal = list(order = c(1,0,1), period = 24), xreg=UNEMPLOY_tr[-length(UNEMPLOY_tr)]))
+summary(arima(Rt_CPI, order = c(2, 0, 5), seasonal = list(order = c(1,0,1), period = 24), xreg=INDPRO_tr[-length(INDPRO_tr)]))
+# Original model aic = -2227.92
+```
+```{r}
+#GDP
+#adjusted explanatory variables to quarterly
+CPI_tr_quar <- NULL
+for(i in 1 : length(CPI_tr))
+{
+  if(i %% 3 == 1)
+  {
+    CPI_tr_quar <- rbind(CPI_tr_quar, CPI_tr[i])
+  }
+}
+Rt_CPI_quar <- diff(log(CPI_tr_quar))[-1]
+
+UNEMPLOY_tr_quar <- NULL
+for(i in 1 : length(UNEMPLOY_tr))
+{
+  if(i %% 3 == 1)
+  {
+    UNEMPLOY_tr_quar <- rbind(UNEMPLOY_tr_quar, UNEMPLOY_tr[i])
+  }
+}
+Rt_UNEPLOY_quar <- diff(log(UNEMPLOY_tr_quar))[-1]
+
+INDPRO_tr_quar <- NULL
+for(i in 1 : length(INDPRO_tr))
+{
+  if(i %% 3 == 1)
+  {
+    INDPRO_tr_quar <- rbind(INDPRO_tr_quar, INDPRO_tr[i])
+  }
+}
+Rt_INDPRO_quar <- diff(log(INDPRO_tr_quar))[-1]
+```
+```{r}
+summary(arima(Rt_GDP, order = c(2, 1, 1), xreg = Rt_CPI_quar))
+summary(arima(Rt_GDP, order = c(2, 1, 1), xreg = Rt_UNEPLOY_quar))
+summary(arima(Rt_GDP, order = c(2, 1, 1), xreg = Rt_INDPRO_quar))
+## GDP vs. dGDP
+arima(Rt_GDP, order = c(2, 1, 1), xreg = GDP_tr[-length(GDP_tr)])
+
+#Original Model aic = -600.48
+
+arimax.gdp<-arima(Rt_GDP, order = c(2, 1, 1), xreg = Rt_INDPRO_quar)
+tsdisplay(arimax.gdp$residuals)
+tsdiag(arimax.gdp)
+```
+
+```{r}
+# Unemployment
+summary(arima(Rt_UNEPLOY,order=c(6,0,5),xreg=Rt_CPI))
+summary(arima(Rt_UNEPLOY,order=c(6,0,5),xreg=Rt_INDPRO))
+summary(arima(Rt_UNEPLOY,order = c(6, 0, 5), xreg = UNEMPLOY_tr[-length(CPI_tr)]))
+summary(arima(Rt_UNEPLOY, order = c(6, 0, 5), xreg = UNEMPLOY_tr[-length(UNEMPLOY_tr)]))
+summary(arima(Rt_UNEPLOY,order = c(6, 0, 5), xreg = UNEMPLOY_tr[-length(INDPRO_tr)]))
+
+#Original ARIMA Model aic = -1160.93
+
+arimax.une<-arima(x = Rt_UNEPLOY, order = c(6, 0, 5), xreg = Rt_INDPRO)
+tsdisplay(arimax.une$residuals)
+tsdiag(arimax.une)
+```
+
+```{r}
+# Industrial Production
+summary(arima(Rt_INDPRO, order = c(1, 0, 3), seasonal = list(order = c(1,0,0), period = 24), xreg=Rt_CPI))
+summary(arima(Rt_INDPRO, order = c(1, 0, 3), seasonal = list(order = c(1,0,0), period = 24), xreg=Rt_UNEPLOY))
+summary(arima(Rt_INDPRO, order = c(1, 0, 3), seasonal = list(order = c(1,0,0), period = 24), xreg=CPI_tr[-length(CPI_tr)]))
+summary(arima(Rt_INDPRO, order = c(1, 0, 3), seasonal = list(order = c(1,0,0), period = 24), xreg=UNEMPLOY_tr[-length(UNEMPLOY_tr)]))
+summary(arima(Rt_INDPRO, order = c(1, 0, 3), seasonal = list(order = c(1,0,0), period = 24), xreg=INDPRO_tr[-length(INDPRO_tr)]/10000))
+
+#Original ARIMA Model aic = -1859.13
+
+arimax.ip<-arima(Rt_INDPRO, order = c(1, 0, 3), seasonal = list(order = c(1,0,0), period = 24), xreg=INDPRO_tr[-length(INDPRO_tr)]/10000)
+tsdisplay(arimax.ip$residuals)
+tsdiag(arimax.ip)
+```
+
+## Prediction and Visualization
+```{r}
+fmodel.cpi<-arima(Rt_CPI, order = c(2, 0, 5), seasonal = list(order = c(1,0,1), period = 24))
+fmodel.gdp<-arima(Rt_GDP, order = c(2, 1, 1), xreg = Rt_INDPRO_quar)
+fmodel.une<-arima(x = Rt_UNEPLOY, order = c(6, 0, 5), xreg = Rt_INDPRO)
+fmodel.ip<-arima(Rt_INDPRO, order = c(1, 0, 3), seasonal = list(order = c(1,0,0), period = 24), xreg=INDPRO_tr[-length(INDPRO_tr)]/10000)
+```
+```{r}
+INDPRO_quar <- NULL
+for(i in 1 : length(INDPRO))
+{
+  if(i %% 3 == 1)
+  {
+    INDPRO_quar <- rbind(INDPRO_quar, INDPRO[i])
+  }
+}
+Rt_qINDPRO <- tail(diff(log(INDPRO_quar))[-1],5)
+
+rt_ip <- tail(diff(log(INDPRO))[-1],16)
+ip<-(tail(INDPRO,16))[-16]/10000
+
+pr.cpi<-predict(fmodel.cpi,16)
+pr.gdp<-predict(fmodel.gdp,newxreg=Rt_qINDPRO,5)
+pr.une<-predict(fmodel.une,newxreg=rt_ip,16)
+pr.ip<-predict(fmodel.ip,newxreg=ip,15)
+
+par(mfrow=c(1,1))
+plotr(CPIAUCNS,rt_cpi,pr.cpi,16,"CPI",c(-.0069,.0105))
+plotr(GDP,rt_gdp,pr.gdp,5,"GDP",c(.0008,.022))
+plotr(UNEMPLOY,rt_unemploy,pr.une,16,"Unemployment Level",c(-.065,.05))
+plotr(INDPRO,rt_indpro,pr.ip,15,"Industrial Production",c(-.015,.015))
+```
+
